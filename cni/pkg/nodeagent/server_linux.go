@@ -44,6 +44,7 @@ func initMeshDataplane(client kube.Client, args AmbientArgs) (*meshDataplane, er
 	log.Debug("creating ipsets in the node netns")
 	// TODO: IPsets are not supported with native nftables, use sets.
 	// Also, since istio directly calls the binaries while programming the rules, we can do the same even with nft.
+	// The plan is to use knftables library instead of using nft directly.
 	set, err := createHostsideProbeIpset(hostCfg.EnableIPv6)
 	if err != nil {
 		return nil, fmt.Errorf("error initializing hostside probe ipset: %w", err)
