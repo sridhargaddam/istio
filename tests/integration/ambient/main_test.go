@@ -34,6 +34,7 @@ import (
 	"istio.io/istio/pkg/test/framework/components/echo/match"
 	"istio.io/istio/pkg/test/framework/components/istio"
 	"istio.io/istio/pkg/test/framework/components/namespace"
+	"istio.io/istio/pkg/test/framework/components/ovnk"
 	"istio.io/istio/pkg/test/framework/components/prometheus"
 	"istio.io/istio/pkg/test/framework/resource"
 	"istio.io/istio/pkg/test/framework/resource/config/apply"
@@ -74,6 +75,84 @@ values:
       networking.istio.io/tunnel: "http"
 `
 )
+
+// buildAmbientCUDNControlPlaneValues builds ControlPlaneValues for ambient with CUDN support
+func buildAmbientCUDNControlPlaneValues(ctx resource.Context) string {
+	return `
+profile: openshift
+components:
+  pilot:
+    k8s:
+      podAnnotations:
+        k8s.ovn.org/open-default-ports: |
+          - protocol: tcp
+            port: 15017
+          - protocol: tcp
+            port: 15012
+          - protocol: tcp
+            port: 443
+          - protocol: tcp
+            port: 15010
+          - protocol: tcp
+            port: 15014
+  ztunnel:
+    namespace: ztunnel
+    k8s:
+      podAnnotations:
+        k8s.ovn.org/open-default-ports: |
+          - protocol: tcp
+            port: 15020
+          - protocol: tcp
+            port: 15021
+  ingressGateways:
+  - name: istio-ingressgateway
+    enabled: true
+    k8s:
+      podAnnotations:
+        k8s.ovn.org/open-default-ports: |
+          - protocol: tcp
+            port: 15021
+          - protocol: tcp
+            port: 15443
+          - protocol: tcp
+            port: 15012
+          - protocol: tcp
+            port: 15017
+          - protocol: tcp
+            port: 15090
+  egressGateways:
+  - name: istio-egressgateway
+    enabled: true
+    k8s:
+      podAnnotations:
+        k8s.ovn.org/open-default-ports: |
+          - protocol: tcp
+            port: 15021
+          - protocol: tcp
+            port: 15443
+          - protocol: tcp
+            port: 15090
+values:
+  global:
+    platform: openshift
+    nativeNftables: true
+  pilot:
+    env:
+      PILOT_ENABLE_OVNK_UDN: "true"
+      ENABLE_WILDCARD_HOST_SERVICE_ENTRIES_FOR_TLS: "true"
+    trustedZtunnelNamespace: ztunnel
+    image: quay.io/sridhargaddam/pilot:ovnk-udn-1.28
+  cni:
+    repair:
+      enabled: false
+  ztunnel:
+    terminationGracePeriodSeconds: 5
+    env:
+      SECRET_TTL: 5m
+    podLabels:
+      networking.istio.io/tunnel: "http"
+`
+}
 
 type EchoDeployments struct {
 	// Namespace echo apps will be deployed
@@ -118,14 +197,32 @@ func TestMain(m *testing.M) {
 			t.Settings().Ambient = true
 			return nil
 		}).
+		// Setup CUDN before Istio installation (if enabled)
+		Setup(func(t resource.Context) error {
+			if t.Settings().EnableCUDN {
+				return ovnk.Setup(t, t.Settings().CUDNNetworkName, t.Settings().CUDNSelector)
+			}
+			return nil
+		}).
 		Setup(istio.Setup(&i, func(ctx resource.Context, cfg *istio.Config) {
 			// can't deploy VMs without eastwest gateway
 			ctx.Settings().SkipVMs()
 			cfg.EnableCNI = true
 			cfg.DeployEastWestGW = false
-			cfg.ControlPlaneValues = ambientControlPlaneValues
 
-			if ctx.Settings().NativeNftables {
+			// Skip Gateway API CRD installation on OpenShift (managed by OpenShift Ingress Operator)
+			if ctx.Settings().OpenShift || ctx.Settings().EnableCUDN {
+				cfg.DeployGatewayAPI = false
+			}
+
+			if ctx.Settings().EnableCUDN {
+				// CUDN configuration with OpenShift profile
+				cfg.ControlPlaneValues = buildAmbientCUDNControlPlaneValues(ctx)
+			} else {
+				cfg.ControlPlaneValues = ambientControlPlaneValues
+			}
+
+			if ctx.Settings().NativeNftables && !ctx.Settings().EnableCUDN {
 				scopes.Framework.Infof("Running the integration tests with nativeNftables enabled")
 				cfg.Values["global.nativeNftables"] = "true"
 			}
@@ -180,8 +277,10 @@ var inMesh = match.Matcher(func(instance echo.Instance) bool {
 func SetupApps(t resource.Context, i istio.Instance, apps *EchoDeployments) error {
 	var err error
 	apps.Namespace, err = namespace.New(t, namespace.Config{
-		Prefix: "echo",
-		Inject: false,
+		Prefix:       "echo",
+		Inject:       false,
+		EnableCUDN:   t.Settings().EnableCUDN,
+		CUDNSelector: t.Settings().CUDNSelector,
 		Labels: map[string]string{
 			label.IoIstioDataplaneMode.Name: "ambient",
 		},
@@ -190,8 +289,10 @@ func SetupApps(t resource.Context, i istio.Instance, apps *EchoDeployments) erro
 		return err
 	}
 	apps.ExternalNamespace, err = namespace.New(t, namespace.Config{
-		Prefix: "external",
-		Inject: false,
+		Prefix:       "external",
+		Inject:       false,
+		EnableCUDN:   t.Settings().EnableCUDN,
+		CUDNSelector: t.Settings().CUDNSelector,
 		Labels: map[string]string{
 			"istio.io/test-exclude-namespace": "true",
 		},
