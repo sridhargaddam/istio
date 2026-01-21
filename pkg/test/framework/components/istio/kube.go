@@ -442,9 +442,20 @@ func initIOPFile(cfg Config, iopFile string, valuesYaml string) (*iopv1alpha1.Is
 func (i *istioImpl) installControlPlaneCluster(c cluster.Cluster) error {
 	scopes.Framework.Infof("setting up %s as control-plane cluster", c.Name())
 
-	// Create system namespace with CUDN labels.
+	// Create system namespace with CUDN labels before istioctl install creates one
+	// without the required labels.
+
 	if err := i.ensureSystemNamespaceWithLabels(c); err != nil {
 		return err
+	}
+
+	// Create the ztunnel namespace with CUDN labels when using ambient mode. We do
+	// this manually because UDN namespaces must include the correct label at creation
+	// time, and the label cannot be added later.
+	if i.ctx.Settings().Ambient && i.ctx.Settings().EnableCUDN {
+		if err := i.ensureNamespaceWithLabels(c, "ztunnel"); err != nil {
+			return err
+		}
 	}
 
 	if !c.IsConfig() {
@@ -901,6 +912,10 @@ func (i *istioImpl) configureRemoteConfigForControlPlane(c cluster.Cluster) erro
 }
 
 func (i *istioImpl) ensureSystemNamespaceWithLabels(c cluster.Cluster) error {
+	return i.ensureNamespaceWithLabels(c, i.cfg.SystemNamespace)
+}
+
+func (i *istioImpl) ensureNamespaceWithLabels(c cluster.Cluster, namespaceName string) error {
 	nsLabels := map[string]string{}
 
 	if i.ctx.Settings().EnableCUDN {
@@ -910,28 +925,38 @@ func (i *istioImpl) ensureSystemNamespaceWithLabels(c cluster.Cluster) error {
 		}
 	}
 
-	// Verify if the namespace already exists.
-	_, err := c.Kube().CoreV1().Namespaces().Get(context.TODO(), i.cfg.SystemNamespace, metav1.GetOptions{})
+	// Try to get existing namespace
+	existingNs, err := c.Kube().CoreV1().Namespaces().Get(context.TODO(), namespaceName, metav1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Create namespace with labels
 			_, err := c.Kube().CoreV1().Namespaces().Create(context.TODO(), &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:   i.cfg.SystemNamespace,
+					Name:   namespaceName,
 					Labels: nsLabels,
 				},
 			}, metav1.CreateOptions{})
 			if err != nil {
-				return fmt.Errorf("failed to create namespace %s: %v", i.cfg.SystemNamespace, err)
+				return fmt.Errorf("failed to create namespace %s: %v", namespaceName, err)
 			}
-			scopes.Framework.Infof("Created namespace %s with CUDN labels on cluster %s", i.cfg.SystemNamespace, c.Name())
+			scopes.Framework.Infof("Created namespace %s with CUDN labels on cluster %s", namespaceName, c.Name())
 			return nil
 		}
-		return fmt.Errorf("failed to get namespace %s: %v", i.cfg.SystemNamespace, err)
+		return fmt.Errorf("failed to get namespace %s: %v", namespaceName, err)
 	}
 
-	// Namespace already exists, return error since we cannot add the label later on.
-	return fmt.Errorf("Cannot add the label to an existing namespace %s: %v", i.cfg.SystemNamespace, err)
+	// Namespace already exists - check if it has CUDN labels when CUDN is enabled
+	if i.ctx.Settings().EnableCUDN {
+		if _, hasLabel := existingNs.Labels[namespace.CUDNPrimaryNetworkLabel]; !hasLabel {
+			return fmt.Errorf("namespace %s already exists without CUDN label. "+
+				"The label '%s' cannot be added after namespace creation in OpenShift. "+
+				"Please delete the namespace first: kubectl delete ns %s",
+				namespaceName, namespace.CUDNPrimaryNetworkLabel, namespaceName)
+		}
+		scopes.Framework.Infof("Namespace %s already exists with CUDN labels on cluster %s", namespaceName, c.Name())
+	}
+
+	return nil
 }
 
 func (i *istioImpl) UpdateInjectionConfig(t resource.Context, update func(*inject.Config) error, cleanup cleanup.Strategy) error {
