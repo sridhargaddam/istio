@@ -660,6 +660,32 @@ func computeWaypoint(
 	return appTunnel, targetWaypoint
 }
 
+// getCUDNIPsFromPodAnnotation extracts CUDN IPs from pod annotations and converts to [][]byte.
+// This is a wrapper around kubeutil.GetCUDNIPsFromPod that converts the result to the format
+// expected by the workload API.
+func getCUDNIPsFromPodAnnotation(pod *v1.Pod) [][]byte {
+	cudnIPStrings := kubeutil.GetCUDNIPsFromPod(pod)
+	if len(cudnIPStrings) == 0 {
+		return nil
+	}
+
+	ips, err := slices.MapErr(cudnIPStrings, func(addr string) ([]byte, error) {
+		n, err := netip.ParseAddr(addr)
+		if err != nil {
+			log.Warnf("invalid CUDN address in pod annotation %s/%s: %v", pod.Namespace, pod.Name, err)
+			return nil, err
+		}
+		return n.AsSlice(), nil
+	})
+	if err == nil && len(ips) > 0 {
+		log.Debugf("Using CUDN IPs from pod annotation for pod %s/%s: %v",
+			pod.Namespace, pod.Name, cudnIPStrings)
+		return ips
+	}
+
+	return nil
+}
+
 // getCUDNIPsFromEndpointSlices attempts to retrieve C-UDN IPs for a pod from mirrored EndpointSlices created by OVN-K.
 // Returns nil if no CUDN IPs are found, allowing fallback to default pod IPs.
 func getCUDNIPsFromEndpointSlices(
@@ -749,15 +775,21 @@ func podWorkloadBuilder(
 			return nil
 		}
 
-		// Try to get CUDN IPs from mirrored EndpointSlices first (if feature is enabled)
 		var podIPs [][]byte
 		var err error
 
 		if features.EnableOVNKubernetesUDN && platform.IsOpenShift() {
+			// Try reading IPs from the EndpointSlice first
 			podIPs = getCUDNIPsFromEndpointSlices(ctx, p, endpointSlices, endpointSlicesAddressIndex)
+
+			// Fallback to pod annotation if no EndpointSlice is found
+			// This handles the case where the mirrored EndpointSlice hasn't been created yet
+			if len(podIPs) == 0 {
+				podIPs = getCUDNIPsFromPodAnnotation(p)
+			}
 		}
 
-		// Fallback to default pod IPs if no CUDN IPs found
+		// Fallback to default pod IPs if CUDN is not enabled or CUDN IPs are not found.
 		if len(podIPs) == 0 {
 			k8sPodIPs := getPodIPs(p)
 			if len(k8sPodIPs) == 0 {
