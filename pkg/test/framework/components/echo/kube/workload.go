@@ -174,18 +174,35 @@ func (w *workload) PodName() string {
 
 func (w *workload) Address() string {
 	w.mutex.Lock()
-	ip := w.pod.Status.PodIP
-	w.mutex.Unlock()
-	return ip
+	defer w.mutex.Unlock()
+
+	// If CUDN is enabled, try to get CUDN IPs from pod annotations
+	if w.ctx.Settings().EnableCUDN {
+		if cudnIPs := istioKube.GetCUDNIPsFromPod(&w.pod); len(cudnIPs) > 0 {
+			return cudnIPs[0]
+		}
+	}
+
+	// Fallback to default pod IP
+	return w.pod.Status.PodIP
 }
 
 func (w *workload) Addresses() []string {
 	w.mutex.Lock()
+	defer w.mutex.Unlock()
+
+	// If CUDN is enabled, try to get CUDN IPs from pod annotations
+	if w.ctx.Settings().EnableCUDN {
+		if cudnIPs := istioKube.GetCUDNIPsFromPod(&w.pod); len(cudnIPs) > 0 {
+			return cudnIPs
+		}
+	}
+
+	// Fallback to default pod IPs
 	var addresses []string
 	for _, podIP := range w.pod.Status.PodIPs {
 		addresses = append(addresses, podIP.IP)
 	}
-	w.mutex.Unlock()
 	return addresses
 }
 
