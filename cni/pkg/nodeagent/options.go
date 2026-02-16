@@ -31,6 +31,8 @@ var (
 	HostProbeSNATIP                = netip.MustParseAddr(env.RegisterStringVar("HOST_PROBE_SNAT_IP", DefaultHostProbeSNATIP, "").Get())
 	HostProbeSNATIPV6              = netip.MustParseAddr(env.RegisterStringVar("HOST_PROBE_SNAT_IPV6", DefaultHostProbeSNATIPV6, "").Get())
 	UseScopedIptablesLegacyLocking = env.RegisterBoolVar("AMBIENT_USE_SCOPED_XTABLES_LOCKING", true, "").Get()
+	OvnkUdnDscpValue               = env.RegisterIntVar("AMBIENT_OVNK_UDN_DSCP", DefaultOVNKUDNDSCP,
+		"DSCP value to mark kubelet health check packets when PILOT_ENABLE_OVNK_UDN is enabled").Get()
 )
 
 const (
@@ -43,6 +45,8 @@ const (
 	// IPv6 link local ranges are designed to be collision-resistant by default, and so probably never need to be overridden
 	DefaultHostProbeSNATIP   = "169.254.7.127"
 	DefaultHostProbeSNATIPV6 = "fd16:9254:7127:1337:ffff:ffff:ffff:ffff"
+	// DSCP value to mark kubelet health check packets when PILOT_ENABLE_OVNK_UDN is enabled
+	DefaultOVNKUDNDSCP = 19
 )
 
 type AmbientArgs struct {
