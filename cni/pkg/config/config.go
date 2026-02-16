@@ -69,6 +69,7 @@ type AmbientConfig struct {
 	Reconcile              bool       `json:"RECONCILE"`
 	CleanupOnly            bool       `json:"CLEANUP_ONLY"`
 	ForceApply             bool       `json:"FORCE_APPLY"`
+	OvnkUdnDscpValue       int        `json:"OVNK_UDN_DSCP_VALUE"`
 }
 
 // GetConfig converts AmbientConfig to tools common config format
