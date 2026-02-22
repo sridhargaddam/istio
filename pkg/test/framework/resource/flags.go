@@ -224,7 +224,7 @@ func init() {
 		"Indicate the tests run in an OpenShift platform rather than in plain Kubernetes.")
 
 	flag.BoolVar(&settingsFromCommandLine.EnableCUDN, "istio.test.enableCUDN", settingsFromCommandLine.EnableCUDN,
-		"Enable Primary CUDN network support for test namespaces (requires OpenShift with OVN-K).")
+		"Enable Primary CUDN network support for test namespaces.")
 
 	flag.StringVar(&settingsFromCommandLine.CUDNNetworkName, "istio.test.cudnNetworkName", "p-cudn-network",
 		"Name of the Primary CUDN network to use for test namespaces.")

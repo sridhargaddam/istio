@@ -16,7 +16,6 @@ package endpointslice
 
 import (
 	"istio.io/istio/pilot/pkg/features"
-	"istio.io/istio/pkg/platform"
 )
 
 const (
@@ -28,7 +27,7 @@ const (
 
 // GetServiceLabelKey returns the appropriate service name label key based on platform and feature flags.
 func GetServiceLabelKey() string {
-	if features.EnableOVNKubernetesUDN && platform.IsOpenShift() {
+	if features.EnableOVNKubernetesUDN {
 		return OVNKubernetesServiceLabel
 	}
 	return KubernetesServiceLabel

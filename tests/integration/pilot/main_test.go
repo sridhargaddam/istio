@@ -85,8 +85,6 @@ components:
           - protocol: tcp
             port: 15090
 values:
-  global:
-    platform: openshift
   pilot:
     image: quay.io/sridhargaddam/pilot:ovnk-udn-1.28
     env:

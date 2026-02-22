@@ -42,7 +42,7 @@ type Config struct {
 	SkipDump bool
 	// SkipCleanup, if enabled, the namespace will not be deleted during cleanup. Used for istio-system namespace
 	SkipCleanup bool
-	// EnableCUDN indicates this namespace should be part of a Primary CUDN network (OpenShift only)
+	// EnableCUDN indicates this namespace should be part of a Primary CUDN network
 	EnableCUDN bool
 	// CUDNSelector is the label key used to match namespaces that are part of CUDN CR (e.g., "cudn-network")
 	CUDNSelector string

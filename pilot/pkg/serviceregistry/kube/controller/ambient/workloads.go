@@ -52,7 +52,6 @@ import (
 	"istio.io/istio/pkg/kube/multicluster"
 	"istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/network"
-	"istio.io/istio/pkg/platform"
 	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/pkg/slices"
 	"istio.io/istio/pkg/util/sets"
@@ -739,7 +738,7 @@ func getCUDNIPsFromEndpointSlices(
 				return n.AsSlice(), nil
 			})
 			if err == nil && len(ips) > 0 {
-				log.Debugf("Using CUDN IPs from mirrored endpointslice %s/%s (service: %s) for pod %s/%s: %v",
+				log.Infof("Using CUDN IPs from mirrored endpointslice %s/%s (service: %s) for pod %s/%s: %v",
 					es.Namespace, es.Name, serviceName, pod.Namespace, pod.Name, ep.Addresses)
 				return ips
 			}
@@ -778,7 +777,7 @@ func podWorkloadBuilder(
 		var podIPs [][]byte
 		var err error
 
-		if features.EnableOVNKubernetesUDN && platform.IsOpenShift() {
+		if features.EnableOVNKubernetesUDN {
 			// Try reading IPs from the EndpointSlice first
 			podIPs = getCUDNIPsFromEndpointSlices(ctx, p, endpointSlices, endpointSlicesAddressIndex)
 
