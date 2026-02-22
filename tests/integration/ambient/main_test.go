@@ -79,7 +79,6 @@ values:
 // buildAmbientCUDNControlPlaneValues builds ControlPlaneValues for ambient with CUDN support
 func buildAmbientCUDNControlPlaneValues(ctx resource.Context) string {
 	return `
-profile: openshift
 components:
   pilot:
     k8s:
@@ -134,7 +133,6 @@ components:
             port: 15090
 values:
   global:
-    platform: openshift
     nativeNftables: true
   pilot:
     env:
@@ -211,12 +209,12 @@ func TestMain(m *testing.M) {
 			cfg.DeployEastWestGW = false
 
 			// Skip Gateway API CRD installation on OpenShift (managed by OpenShift Ingress Operator)
-			if ctx.Settings().OpenShift || ctx.Settings().EnableCUDN {
+			if ctx.Settings().OpenShift {
 				cfg.DeployGatewayAPI = false
 			}
 
 			if ctx.Settings().EnableCUDN {
-				// CUDN configuration with OpenShift profile
+				// CUDN configuration
 				cfg.ControlPlaneValues = buildAmbientCUDNControlPlaneValues(ctx)
 			} else {
 				cfg.ControlPlaneValues = ambientControlPlaneValues

@@ -863,7 +863,7 @@ func (i *istioImpl) configureRemoteConfigForControlPlane(c cluster.Cluster) erro
 	scopes.Framework.Infof("configuring external control plane in %s to use config cluster %s", c.Name(), configCluster.Name())
 	// ensure system namespace exists
 	nsLabels := map[string]string{}
-	// Add CUDN labels if enabled (OpenShift specific)
+	// Add CUDN labels if enabled
 	if i.ctx.Settings().EnableCUDN {
 		nsLabels[namespace.CUDNPrimaryNetworkLabel] = ""
 		if i.ctx.Settings().CUDNSelector != "" {
@@ -949,7 +949,7 @@ func (i *istioImpl) ensureNamespaceWithLabels(c cluster.Cluster, namespaceName s
 	if i.ctx.Settings().EnableCUDN {
 		if _, hasLabel := existingNs.Labels[namespace.CUDNPrimaryNetworkLabel]; !hasLabel {
 			return fmt.Errorf("namespace %s already exists without CUDN label. "+
-				"The label '%s' cannot be added after namespace creation in OpenShift. "+
+				"The label '%s' cannot be added after namespace creation. "+
 				"Please delete the namespace first: kubectl delete ns %s",
 				namespaceName, namespace.CUDNPrimaryNetworkLabel, namespaceName)
 		}

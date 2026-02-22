@@ -198,7 +198,7 @@ type Settings struct {
 	// If enabled, native nftable rules will be used for traffic redirection instead of iptable rules.
 	NativeNftables bool
 
-	// EnableCUDN indicates that tests should run in a Primary CUDN network (OpenShift with OVN-K only)
+	// EnableCUDN indicates that tests should run in a Primary CUDN network
 	EnableCUDN bool
 
 	// CUDNNetworkName is the name of the CUDN network to use for test namespaces
