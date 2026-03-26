@@ -146,11 +146,19 @@ func (m *CUDNManager) Delete() error {
 	return nil
 }
 
-// Setup is a utility function for setting up ClusterUserDefinedNetwork in a test suite
+// Setup is a utility function for setting up ClusterUserDefinedNetwork in a test suite.
+// It deploys a MutatingAdmissionPolicy to automatically label namespaces with UDN labels
+// at creation time, then creates the CUDN CR.
 func Setup(ctx resource.Context, networkName, selectorKey string) error {
 	if !ctx.Settings().EnableCUDN {
 		scopes.Framework.Info("EnableCUDN is not set, skipping ClusterUserDefinedNetwork creation")
 		return nil
+	}
+
+	// Deploy mutating admission policy first so all subsequently created
+	// namespaces are automatically labeled for UDN.
+	if err := DeployMutatingAdmissionPolicy(ctx, selectorKey); err != nil {
+		return fmt.Errorf("deploying UDN namespace labeler policy: %w", err)
 	}
 
 	manager := NewCUDNManager(ctx, networkName, selectorKey)

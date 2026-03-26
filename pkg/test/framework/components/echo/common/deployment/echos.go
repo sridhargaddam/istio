@@ -145,11 +145,9 @@ func (c *Config) fillDefaults(ctx resource.Context) error {
 			// If only using a single namespace, preserve the "echo" prefix.
 			g.Go(func() error {
 				ns, err := namespace.New(ctx, namespace.Config{
-					Inject:       !ctx.Settings().AmbientEverywhere,
-					Prefix:       "echo",
-					Labels:       nsLabels,
-					EnableCUDN:   ctx.Settings().EnableCUDN,
-					CUDNSelector: ctx.Settings().CUDNSelector,
+					Inject: !ctx.Settings().AmbientEverywhere,
+					Prefix: "echo",
+					Labels: nsLabels,
 				})
 				if err != nil {
 					return err
@@ -161,10 +159,8 @@ func (c *Config) fillDefaults(ctx resource.Context) error {
 			for i := 0; i < c.NamespaceCount; i++ {
 				g.Go(func() error {
 					ns, err := namespace.New(ctx, namespace.Config{
-						Prefix:       fmt.Sprintf("echo%d", i+1),
-						Inject:       true,
-						EnableCUDN:   ctx.Settings().EnableCUDN,
-						CUDNSelector: ctx.Settings().CUDNSelector,
+						Prefix: fmt.Sprintf("echo%d", i+1),
+						Inject: true,
 					})
 					if err != nil {
 						return err
@@ -180,10 +176,8 @@ func (c *Config) fillDefaults(ctx resource.Context) error {
 	if c.ExternalNamespace == nil && !c.NoExternalNamespace {
 		g.Go(func() error {
 			ns, err := namespace.New(ctx, namespace.Config{
-				Prefix:       "external",
-				Inject:       false,
-				EnableCUDN:   ctx.Settings().EnableCUDN,
-				CUDNSelector: ctx.Settings().CUDNSelector,
+				Prefix: "external",
+				Inject: false,
 			})
 			if err != nil {
 				return err

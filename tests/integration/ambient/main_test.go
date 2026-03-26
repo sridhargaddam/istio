@@ -275,10 +275,8 @@ var inMesh = match.Matcher(func(instance echo.Instance) bool {
 func SetupApps(t resource.Context, i istio.Instance, apps *EchoDeployments) error {
 	var err error
 	apps.Namespace, err = namespace.New(t, namespace.Config{
-		Prefix:       "echo",
-		Inject:       false,
-		EnableCUDN:   t.Settings().EnableCUDN,
-		CUDNSelector: t.Settings().CUDNSelector,
+		Prefix: "echo",
+		Inject: false,
 		Labels: map[string]string{
 			label.IoIstioDataplaneMode.Name: "ambient",
 		},
@@ -287,10 +285,8 @@ func SetupApps(t resource.Context, i istio.Instance, apps *EchoDeployments) erro
 		return err
 	}
 	apps.ExternalNamespace, err = namespace.New(t, namespace.Config{
-		Prefix:       "external",
-		Inject:       false,
-		EnableCUDN:   t.Settings().EnableCUDN,
-		CUDNSelector: t.Settings().CUDNSelector,
+		Prefix: "external",
+		Inject: false,
 		Labels: map[string]string{
 			"istio.io/test-exclude-namespace": "true",
 		},

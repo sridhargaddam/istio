@@ -47,7 +47,6 @@ import (
 	"istio.io/istio/pkg/test/framework/components/environment/kube"
 	"istio.io/istio/pkg/test/framework/components/istio/ingress"
 	"istio.io/istio/pkg/test/framework/components/istioctl"
-	"istio.io/istio/pkg/test/framework/components/namespace"
 	"istio.io/istio/pkg/test/framework/resource"
 	"istio.io/istio/pkg/test/framework/resource/config/apply"
 	"istio.io/istio/pkg/test/framework/resource/config/cleanup"
@@ -442,22 +441,6 @@ func initIOPFile(cfg Config, iopFile string, valuesYaml string) (*iopv1alpha1.Is
 func (i *istioImpl) installControlPlaneCluster(c cluster.Cluster) error {
 	scopes.Framework.Infof("setting up %s as control-plane cluster", c.Name())
 
-	// Create system namespace with CUDN labels before istioctl install creates one
-	// without the required labels.
-
-	if err := i.ensureSystemNamespaceWithLabels(c); err != nil {
-		return err
-	}
-
-	// Create the ztunnel namespace with CUDN labels when using ambient mode. We do
-	// this manually because UDN namespaces must include the correct label at creation
-	// time, and the label cannot be added later.
-	if i.ctx.Settings().Ambient && i.ctx.Settings().EnableCUDN {
-		if err := i.ensureNamespaceWithLabels(c, "ztunnel"); err != nil {
-			return err
-		}
-	}
-
 	if !c.IsConfig() {
 		if err := i.configureRemoteConfigForControlPlane(c); err != nil {
 			return err
@@ -549,11 +532,6 @@ func (i *istioImpl) installRemoteCluster(c cluster.Cluster) error {
 
 // Common install on a either a remote-config or pure remote cluster.
 func (i *istioImpl) installRemoteCommon(c cluster.Cluster, defaultsIOPFile, iopFile string, discovery bool) error {
-	// Create system namespace with CUDN labels.
-	if err := i.ensureSystemNamespaceWithLabels(c); err != nil {
-		return err
-	}
-
 	args := commonInstallArgs(i.ctx, i.cfg, c, defaultsIOPFile, iopFile)
 	if i.env.IsMultiCluster() {
 		// Set the clusterName for the local cluster.
@@ -798,13 +776,6 @@ func (i *istioImpl) deployCACerts() error {
 		if i.env.IsMultiNetwork() {
 			nsLabels[label.TopologyNetwork.Name] = c.NetworkName()
 		}
-		// Add CUDN labels if enabled
-		if i.ctx.Settings().EnableCUDN {
-			nsLabels[namespace.CUDNPrimaryNetworkLabel] = ""
-			if i.ctx.Settings().CUDNSelector != "" {
-				nsLabels[i.ctx.Settings().CUDNSelector] = "true"
-			}
-		}
 		var nsAnnotations map[string]string
 		if c.IsRemote() {
 			nsAnnotations = map[string]string{
@@ -862,19 +833,10 @@ func (i *istioImpl) configureRemoteConfigForControlPlane(c cluster.Cluster) erro
 
 	scopes.Framework.Infof("configuring external control plane in %s to use config cluster %s", c.Name(), configCluster.Name())
 	// ensure system namespace exists
-	nsLabels := map[string]string{}
-	// Add CUDN labels if enabled
-	if i.ctx.Settings().EnableCUDN {
-		nsLabels[namespace.CUDNPrimaryNetworkLabel] = ""
-		if i.ctx.Settings().CUDNSelector != "" {
-			nsLabels[i.ctx.Settings().CUDNSelector] = "true"
-		}
-	}
 	if _, err = c.Kube().CoreV1().Namespaces().
 		Create(context.TODO(), &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:   i.cfg.SystemNamespace,
-				Labels: nsLabels,
+				Name: i.cfg.SystemNamespace,
 			},
 		}, metav1.CreateOptions{}); err != nil && !errors.IsAlreadyExists(err) {
 		return err
@@ -908,54 +870,6 @@ func (i *istioImpl) configureRemoteConfigForControlPlane(c cluster.Cluster) erro
 			return err
 		}
 	}
-	return nil
-}
-
-func (i *istioImpl) ensureSystemNamespaceWithLabels(c cluster.Cluster) error {
-	return i.ensureNamespaceWithLabels(c, i.cfg.SystemNamespace)
-}
-
-func (i *istioImpl) ensureNamespaceWithLabels(c cluster.Cluster, namespaceName string) error {
-	nsLabels := map[string]string{}
-
-	if i.ctx.Settings().EnableCUDN {
-		nsLabels[namespace.CUDNPrimaryNetworkLabel] = ""
-		if i.ctx.Settings().CUDNSelector != "" {
-			nsLabels[i.ctx.Settings().CUDNSelector] = "true"
-		}
-	}
-
-	// Try to get existing namespace
-	existingNs, err := c.Kube().CoreV1().Namespaces().Get(context.TODO(), namespaceName, metav1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			// Create namespace with labels
-			_, err := c.Kube().CoreV1().Namespaces().Create(context.TODO(), &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   namespaceName,
-					Labels: nsLabels,
-				},
-			}, metav1.CreateOptions{})
-			if err != nil {
-				return fmt.Errorf("failed to create namespace %s: %v", namespaceName, err)
-			}
-			scopes.Framework.Infof("Created namespace %s with CUDN labels on cluster %s", namespaceName, c.Name())
-			return nil
-		}
-		return fmt.Errorf("failed to get namespace %s: %v", namespaceName, err)
-	}
-
-	// Namespace already exists - check if it has CUDN labels when CUDN is enabled
-	if i.ctx.Settings().EnableCUDN {
-		if _, hasLabel := existingNs.Labels[namespace.CUDNPrimaryNetworkLabel]; !hasLabel {
-			return fmt.Errorf("namespace %s already exists without CUDN label. "+
-				"The label '%s' cannot be added after namespace creation. "+
-				"Please delete the namespace first: kubectl delete ns %s",
-				namespaceName, namespace.CUDNPrimaryNetworkLabel, namespaceName)
-		}
-		scopes.Framework.Infof("Namespace %s already exists with CUDN labels on cluster %s", namespaceName, c.Name())
-	}
-
 	return nil
 }
 
