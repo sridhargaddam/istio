@@ -27,6 +27,8 @@ import (
 	prometheusApi "github.com/prometheus/client_golang/api"
 	prometheusApiV1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
+	corev1 "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	istioKube "istio.io/istio/pkg/kube"
@@ -75,12 +77,31 @@ func installPrometheus(ctx resource.Context, ns string) error {
 		return err
 	}
 	yaml = strings.ReplaceAll(yaml, "namespace: istio-system", fmt.Sprintf("namespace: %s", ns))
+	if err := ensureNamespace(ctx, ns); err != nil {
+		return err
+	}
 	if err := ctx.ConfigKube().YAML(ns, yaml).Apply(apply.NoCleanup); err != nil {
 		return err
 	}
 	ctx.CleanupConditionally(func() {
 		_ = ctx.ConfigKube().YAML(ns, yaml).Delete()
 	})
+	return nil
+}
+
+func ensureNamespace(ctx resource.Context, ns string) error {
+	for _, cls := range ctx.Clusters() {
+		nsObj := &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: ns,
+			},
+		}
+		if _, err := cls.Kube().CoreV1().Namespaces().Create(context.TODO(), nsObj, metav1.CreateOptions{}); err != nil {
+			if !kerrors.IsAlreadyExists(err) {
+				return fmt.Errorf("creating namespace %s: %w", ns, err)
+			}
+		}
+	}
 	return nil
 }
 
