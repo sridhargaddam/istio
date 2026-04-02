@@ -18,6 +18,7 @@ package ambient
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -80,29 +81,6 @@ values:
 func buildAmbientCUDNControlPlaneValues(ctx resource.Context) string {
 	return `
 components:
-  pilot:
-    k8s:
-      podAnnotations:
-        k8s.ovn.org/open-default-ports: |
-          - protocol: tcp
-            port: 15017
-          - protocol: tcp
-            port: 15012
-          - protocol: tcp
-            port: 443
-          - protocol: tcp
-            port: 15010
-          - protocol: tcp
-            port: 15014
-  ztunnel:
-    namespace: ztunnel
-    k8s:
-      podAnnotations:
-        k8s.ovn.org/open-default-ports: |
-          - protocol: tcp
-            port: 15020
-          - protocol: tcp
-            port: 15021
   ingressGateways:
   - name: istio-ingressgateway
     enabled: true
@@ -131,10 +109,24 @@ components:
             port: 15443
           - protocol: tcp
             port: 15090
+  ztunnel:
+    namespace: ztunnel
 values:
   global:
     nativeNftables: true
   pilot:
+    podAnnotations:
+      k8s.ovn.org/open-default-ports: |
+        - protocol: tcp
+          port: 15017
+        - protocol: tcp
+          port: 15012
+        - protocol: tcp
+          port: 443
+        - protocol: tcp
+          port: 15010
+        - protocol: tcp
+          port: 15014
     env:
       PILOT_ENABLE_OVNK_UDN: "true"
       ENABLE_WILDCARD_HOST_SERVICE_ENTRIES_FOR_TLS: "true"
@@ -149,6 +141,12 @@ values:
       SECRET_TTL: 5m
     podLabels:
       networking.istio.io/tunnel: "http"
+    podAnnotations:
+      k8s.ovn.org/open-default-ports: |
+        - protocol: tcp
+          port: 15020
+        - protocol: tcp
+          port: 15021
 `
 }
 
@@ -198,6 +196,14 @@ func TestMain(m *testing.M) {
 		// Setup CUDN before Istio installation (if enabled)
 		Setup(func(t resource.Context) error {
 			if t.Settings().EnableCUDN {
+				cfg, err := istio.DefaultConfig(t)
+				if err != nil {
+					return err
+				}
+				if cfg.TelemetryNamespace == cfg.SystemNamespace {
+					return fmt.Errorf("when CUDN is enabled, --istio.test.kube.telemetryNamespace must differ from the control plane namespace %q "+
+						"so that Prometheus is deployed outside the CUDN network and can scrape metrics via the default network", cfg.SystemNamespace)
+				}
 				return ovnk.Setup(t, t.Settings().CUDNNetworkName, t.Settings().CUDNSelector)
 			}
 			return nil

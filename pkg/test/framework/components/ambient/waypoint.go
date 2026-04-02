@@ -15,6 +15,7 @@
 package ambient
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -137,6 +138,12 @@ func NewWaypointProxyForCluster(ctx resource.Context, ns namespace.Instance, nam
 		return nil, err
 	}
 
+	if ctx.Settings().EnableCUDN {
+		if err := annotateWaypointForCUDN(cls, ns.Name(), name); err != nil {
+			return nil, err
+		}
+	}
+
 	// Find the Waypoint pod and service, and start forwarding a local port.
 	fetchFn := testKube.NewSinglePodFetch(cls, ns.Name(), fmt.Sprintf("%s=%s", label.IoK8sNetworkingGatewayGatewayName.Name, name))
 	pods, err := testKube.WaitUntilPodsAreReady(fetchFn)
@@ -195,6 +202,12 @@ func NewWaypointProxy(ctx resource.Context, ns namespace.Instance, name string) 
 		})
 		if err != nil {
 			return nil, err
+		}
+
+		if ctx.Settings().EnableCUDN {
+			if err := annotateWaypointForCUDN(cls, ns.Name(), name); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -282,6 +295,12 @@ func NewWaypointProxyWithTrafficType(ctx resource.Context, ns namespace.Instance
 		if err != nil {
 			return nil, err
 		}
+
+		if ctx.Settings().EnableCUDN {
+			if err := annotateWaypointForCUDN(cls, ns.Name(), name); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	for _, cls := range ctx.AllClusters() {
@@ -316,6 +335,32 @@ func NewWaypointProxyWithTrafficType(ctx resource.Context, ns namespace.Instance
 		servers = append(servers, server)
 	}
 	return servers, nil
+}
+
+// annotateWaypointForCUDN adds the k8s.ovn.org/open-default-ports annotation to a
+// waypoint Gateway so that Prometheus can scrape metrics through the default network.
+// This is done as a separate step because waypoints are created via istioctl, which
+// does not support passing custom annotations.
+func annotateWaypointForCUDN(cls cluster.Cluster, namespace, name string) error {
+	gwClient := cls.GatewayAPI().GatewayV1().Gateways(namespace)
+	gw, err := gwClient.Get(context.Background(), name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("getting gateway %s/%s: %w", namespace, name, err)
+	}
+	if gw.Annotations == nil {
+		gw.Annotations = make(map[string]string)
+	}
+	gw.Annotations["k8s.ovn.org/open-default-ports"] = `
+- protocol: tcp
+  port: 15020
+- protocol: tcp
+  port: 15021
+- protocol: tcp
+  port: 15090`
+	if _, err := gwClient.Update(context.Background(), gw, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("updating gateway %s/%s annotations: %w", namespace, name, err)
+	}
+	return nil
 }
 
 func SetWaypointForService(t framework.TestContext, ns namespace.Instance, service, waypoint string) {
