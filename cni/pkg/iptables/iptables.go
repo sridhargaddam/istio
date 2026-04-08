@@ -672,13 +672,6 @@ func (cfg *IptablesConfigurator) DeleteHostRules() {
 func (cfg *IptablesConfigurator) AppendHostRules() *builder.IptablesRuleBuilder {
 	iptablesBuilder := builder.NewIptablesRuleBuilder(config.GetConfig(cfg.cfg))
 
-	// For easier cleanup, insert a jump into an owned chain
-	// -I POSTROUTING 1 -p tcp -j ISTIO_POSTRT
-	iptablesBuilder.InsertRule(
-		"POSTROUTING", "nat", 1,
-		"-j", ChainHostPostrouting,
-	)
-
 	// TODO BML I don't think we need UDP? TCP healthcheck redir should catch everything.
 
 	// This is effectively an analog for Istio's old-style podSpec-based health check rewrites.
@@ -724,6 +717,14 @@ func (cfg *IptablesConfigurator) AppendHostRules() *builder.IptablesRuleBuilder 
 			)
 		}
 	} else {
+
+		// For easier cleanup, insert a jump into an owned chain
+		// -I POSTROUTING 1 -p tcp -j ISTIO_POSTRT
+		iptablesBuilder.InsertRule(
+			"POSTROUTING", "nat", 1,
+			"-j", ChainHostPostrouting,
+		)
+
 		// Standard mode: Use SNAT
 		// -A OUTPUT -m owner --socket-exists -p tcp -m set --match-set istio-inpod-probes dst,dst -j SNAT --to-source 169.254.7.127
 		iptablesBuilder.AppendRuleV4(
