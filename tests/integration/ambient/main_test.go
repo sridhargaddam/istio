@@ -35,6 +35,7 @@ import (
 	"istio.io/istio/pkg/test/framework/components/istio"
 	"istio.io/istio/pkg/test/framework/components/namespace"
 	"istio.io/istio/pkg/test/framework/components/prometheus"
+	"istio.io/istio/pkg/test/framework/components/udn"
 	"istio.io/istio/pkg/test/framework/resource"
 	"istio.io/istio/pkg/test/framework/resource/config/apply"
 	"istio.io/istio/pkg/test/scopes"
@@ -118,12 +119,17 @@ func TestMain(m *testing.M) {
 			t.Settings().Ambient = true
 			return nil
 		}).
+		Setup(udn.SuiteSetup).
 		Setup(istio.Setup(&i, func(ctx resource.Context, cfg *istio.Config) {
 			// can't deploy VMs without eastwest gateway
 			ctx.Settings().SkipVMs()
 			cfg.EnableCNI = true
 			cfg.DeployEastWestGW = false
 			cfg.ControlPlaneValues = ambientControlPlaneValues
+
+			if ctx.Settings().EnableCUDN {
+				cfg.ControlPlaneValues += udn.BuildAmbientControlPlaneValues()
+			}
 
 			if ctx.Settings().NativeNftables {
 				scopes.Framework.Infof("Running the integration tests with nativeNftables enabled")

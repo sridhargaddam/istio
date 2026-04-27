@@ -36,6 +36,9 @@ import (
 func TestZtunnelConfig(t *testing.T) {
 	framework.NewTest(t).
 		Run(func(t framework.TestContext) {
+			if t.Settings().EnableCUDN {
+				t.Skip("ztunnel namespace assumption differs in CUDN environments")
+			}
 			// Test setup
 			istioCtl := istioctl.NewOrFail(t, istioctl.Config{})
 			istioCfg := istio.DefaultConfigOrFail(t, t)

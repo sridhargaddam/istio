@@ -283,6 +283,9 @@ func TestPodIP(t *testing.T) {
 								if src.Config().HasSidecar() {
 									t.Skip("not supported yet")
 								}
+								if t.Settings().EnableCUDN {
+									t.Skip("direct PodIP addressing not reliable in CUDN environments")
+								}
 
 								if t.Settings().AmbientMultiNetwork && srcWl.Cluster() != dstWl.Cluster() {
 									// TODO: Enable when we support multi-network workload addressing
@@ -3219,6 +3222,9 @@ func TestMetadataServer(t *testing.T) {
 
 func TestAPIServer(t *testing.T) {
 	framework.NewTest(t).Run(func(t framework.TestContext) {
+		if t.Settings().EnableCUDN {
+			t.Skip("kube-apiserver connectivity differs in CUDN environments")
+		}
 		for _, cluster := range t.Clusters() {
 			svcs := apps.All.ForCluster(cluster.Name())
 			token, err := cluster.Kube().CoreV1().ServiceAccounts(apps.Namespace.Name()).CreateToken(context.Background(), "default",
@@ -3903,6 +3909,9 @@ spec:
 func TestZtunnelSecureMetrics(t *testing.T) {
 	framework.NewTest(t).
 		Run(func(tc framework.TestContext) {
+			if tc.Settings().EnableCUDN {
+				tc.Skip("ztunnel metric scraping uses PodIP which differs from CUDN IP")
+			}
 			for _, c := range tc.Clusters() {
 				clientInstance := apps.Captured.ForCluster(c.Name())[0]
 				if clientInstance == nil {
