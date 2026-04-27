@@ -398,6 +398,13 @@ var (
 		true,
 		"If enabled, pilot will start the credentials controller for remote clusters. Default is true.",
 	).Get()
+
+	EnableOVNKubernetesUDN = env.Register(
+		"PILOT_ENABLE_OVNK_UDN",
+		false,
+		"If enabled, Istio will use OVN-Kubernetes mirrored EndpointSlices (labeled with "+
+			"'k8s.ovn.org/service-name') for service discovery in User-Defined Network (UDN) environments. ",
+	).Get()
 )
 
 // UnsafeFeaturesEnabled returns true if any unsafe features are enabled.
