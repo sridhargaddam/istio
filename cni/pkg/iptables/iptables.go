@@ -23,6 +23,7 @@ import (
 	"istio.io/istio/cni/pkg/ipset"
 	"istio.io/istio/cni/pkg/scopes"
 	"istio.io/istio/cni/pkg/util"
+	"istio.io/istio/pilot/pkg/features"
 	istiolog "istio.io/istio/pkg/log"
 	"istio.io/istio/pkg/ptr"
 	"istio.io/istio/tools/istio-iptables/pkg/builder"
@@ -290,17 +291,65 @@ func (cfg *IptablesConfigurator) AppendInpodRules(podOverrides config.PodLevelOv
 		// We do this so we can exempt this traffic from ztunnel capture/proxy - otherwise both kube-proxy (legit)
 		// and kubelet (skippable) traffic would have the same srcip once they got to the pod, and would be indistinguishable.
 
-		// CLI: -t mangle -A ISTIO_PRERT -s 169.254.7.127 -p tcp -m tcp --dport <PROBEPORT> -j ACCEPT
-		// CLI: -t mangle -A ISTIO_PRERT -s fd16:9254:7127:1337:ffff:ffff:ffff:ffff -p tcp -m tcp --dport <PROBEPORT> -j ACCEPT
-		//
-		// DESC: If this is one of our node-probe ports and is from our SNAT-ed/"special" hostside IP, short-circuit out here
-		iptablesBuilder.AppendVersionedRule(cfg.cfg.HostProbeSNATAddress.String(), cfg.cfg.HostProbeV6SNATAddress.String(),
-			ChainInpodPrerouting, "nat",
-			"-s", iptablesconstants.IPVersionSpecific,
-			"-p", "tcp",
-			"-m", "tcp",
-			"-j", "ACCEPT",
-		)
+		if features.EnableOVNKubernetesUDN {
+			// OVN-K UDN mode: match health check packets by DSCP value and source IP of the
+			// management plane interface instead of SNAT-based identification.
+			ifaceName := cfg.cfg.OvnkUdnInterface
+			var ovnkIPv4 string
+			if err := util.RunAsHost(func() error {
+				addr, lookupErr := util.GetInterfaceIPv4(ifaceName)
+				if lookupErr != nil {
+					return lookupErr
+				}
+				ovnkIPv4 = addr.String()
+				return nil
+			}); err != nil {
+				log.Errorf("OVN-K UDN mode: failed to get %s IPv4 address: %v", ifaceName, err)
+			} else {
+				iptablesBuilder.AppendRuleV4(
+					ChainInpodPrerouting, "nat",
+					"-s", ovnkIPv4,
+					"-p", "tcp",
+					"-m", "dscp",
+					"--dscp", fmt.Sprint(cfg.cfg.OvnkUdnDscpValue),
+					"-j", "ACCEPT",
+				)
+			}
+
+			if cfg.cfg.EnableIPv6 {
+				var ovnkIPv6 string
+				if err := util.RunAsHost(func() error {
+					addr, lookupErr := util.GetInterfaceIPv6(ifaceName)
+					if lookupErr != nil {
+						return lookupErr
+					}
+					ovnkIPv6 = addr.String()
+					return nil
+				}); err != nil {
+					log.Errorf("OVN-K UDN mode: failed to get %s IPv6 address: %v", ifaceName, err)
+				} else {
+					iptablesBuilder.AppendRuleV6(
+						ChainInpodPrerouting, "nat",
+						"-s", ovnkIPv6,
+						"-p", "tcp",
+						"-m", "dscp",
+						"--dscp", fmt.Sprint(cfg.cfg.OvnkUdnDscpValue),
+						"-j", "ACCEPT",
+					)
+				}
+			}
+		} else {
+			// Standard mode: match health check packets by SNAT-ed source IP
+			// CLI: -t mangle -A ISTIO_PRERT -s 169.254.7.127 -p tcp -m tcp --dport <PROBEPORT> -j ACCEPT
+			// CLI: -t mangle -A ISTIO_PRERT -s fd16:9254:7127:1337:ffff:ffff:ffff:ffff -p tcp -m tcp --dport <PROBEPORT> -j ACCEPT
+			iptablesBuilder.AppendVersionedRule(cfg.cfg.HostProbeSNATAddress.String(), cfg.cfg.HostProbeV6SNATAddress.String(),
+				ChainInpodPrerouting, "nat",
+				"-s", iptablesconstants.IPVersionSpecific,
+				"-p", "tcp",
+				"-m", "tcp",
+				"-j", "ACCEPT",
+			)
+		}
 	}
 
 	// CLI: -t NAT -A ISTIO_OUTPUT -d 169.254.7.127 -p tcp -m tcp -j ACCEPT
@@ -611,54 +660,68 @@ func (cfg *IptablesConfigurator) DeleteHostRules() {
 func (cfg *IptablesConfigurator) AppendHostRules() *builder.IptablesRuleBuilder {
 	iptablesBuilder := builder.NewIptablesRuleBuilder(config.GetConfig(cfg.cfg))
 
-	// For easier cleanup, insert a jump into an owned chain
-	// -I POSTROUTING 1 -p tcp -j ISTIO_POSTRT
-	iptablesBuilder.InsertRule(
-		"POSTROUTING", "nat", 1,
-		"-j", ChainHostPostrouting,
-	)
+	if features.EnableOVNKubernetesUDN {
+		// OVN-K UDN mode: use DSCP marking in the mangle table instead of SNAT,
+		// because SNAT does not work in UDN environments where the pod's default
+		// network is the user-defined overlay.
+		iptablesBuilder.AppendRuleV4(
+			"POSTROUTING", "mangle",
+			"-m", "owner",
+			"--socket-exists",
+			"-p", "tcp",
+			"-m", "set",
+			"--match-set", fmt.Sprintf(ipset.V4Name, config.ProbeIPSet),
+			"dst",
+			"-j", "DSCP",
+			"--set-dscp", fmt.Sprint(cfg.cfg.OvnkUdnDscpValue),
+		)
 
-	// TODO BML I don't think we need UDP? TCP healthcheck redir should catch everything.
+		if cfg.cfg.EnableIPv6 {
+			iptablesBuilder.AppendRuleV6(
+				"POSTROUTING", "mangle",
+				"-m", "owner",
+				"--socket-exists",
+				"-p", "tcp",
+				"-m", "set",
+				"--match-set", fmt.Sprintf(ipset.V6Name, config.ProbeIPSet),
+				"dst",
+				"-j", "DSCP",
+				"--set-dscp", fmt.Sprint(cfg.cfg.OvnkUdnDscpValue),
+			)
+		}
+	} else {
+		// Standard mode: use SNAT to a link-local IP to identify health check traffic.
+		// Jump into an owned chain for easier cleanup.
+		iptablesBuilder.InsertRule(
+			"POSTROUTING", "nat", 1,
+			"-j", ChainHostPostrouting,
+		)
 
-	// This is effectively an analog for Istio's old-style podSpec-based health check rewrites.
-	// Before Istio would update the pod manifest to rewrite healthchecks to go to sidecar Envoy port 15021,
-	// so that it could distinguish things that can be unauthenticated (healthchecks) from other kinds of node traffic
-	// (e.g. LoadBalanced Service packets, etc) that need to be authenticated/captured/proxied.
-	//
-	// We want to do the same thing in ambient but can't rely on podSpec injection. So, do effectively the same thing,
-	// but with iptables rules - use `--socket-exists` as a proxy for "is this a forwarded packet" vs "is this originating from
-	// a local node socket". If the latter, outside the pod in the host netns, redirect that traffic to a hardcoded/custom proxy
-	// healthcheck port, just like we used to. Otherwise, we can't assume it's local-node privileged traffic, and will capture and process it normally.
-	//
-	// All this is necessary because quite often apps use the same port for healthchecks as they do for reg. traffic, and
-	// we cannot make assumptions there.
-
-	// -A OUTPUT -m owner --socket-exists -p tcp -m set --match-set istio-inpod-probes dst,dst -j SNAT --to-source 169.254.7.127
-	iptablesBuilder.AppendRuleV4(
-		ChainHostPostrouting, "nat",
-		"-m", "owner",
-		"--socket-exists",
-		"-p", "tcp",
-		"-m", "set",
-		"--match-set", fmt.Sprintf(ipset.V4Name, config.ProbeIPSet),
-		"dst",
-		"-j", "SNAT",
-		"--to-source", cfg.cfg.HostProbeSNATAddress.String(),
-	)
-
-	// For V6 we have to use a different set and a different SNAT IP
-	if cfg.cfg.EnableIPv6 {
-		iptablesBuilder.AppendRuleV6(
+		iptablesBuilder.AppendRuleV4(
 			ChainHostPostrouting, "nat",
 			"-m", "owner",
 			"--socket-exists",
 			"-p", "tcp",
 			"-m", "set",
-			"--match-set", fmt.Sprintf(ipset.V6Name, config.ProbeIPSet),
+			"--match-set", fmt.Sprintf(ipset.V4Name, config.ProbeIPSet),
 			"dst",
 			"-j", "SNAT",
-			"--to-source", cfg.cfg.HostProbeV6SNATAddress.String(),
+			"--to-source", cfg.cfg.HostProbeSNATAddress.String(),
 		)
+
+		if cfg.cfg.EnableIPv6 {
+			iptablesBuilder.AppendRuleV6(
+				ChainHostPostrouting, "nat",
+				"-m", "owner",
+				"--socket-exists",
+				"-p", "tcp",
+				"-m", "set",
+				"--match-set", fmt.Sprintf(ipset.V6Name, config.ProbeIPSet),
+				"dst",
+				"-j", "SNAT",
+				"--to-source", cfg.cfg.HostProbeV6SNATAddress.String(),
+			)
+		}
 	}
 
 	return iptablesBuilder

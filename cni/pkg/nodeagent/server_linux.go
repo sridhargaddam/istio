@@ -39,6 +39,8 @@ func initMeshDataplane(client kube.Client, args AmbientArgs) (*meshDataplane, er
 		EnableIPv6:             args.EnableIPv6,
 		HostProbeSNATAddress:   HostProbeSNATIP,
 		HostProbeV6SNATAddress: HostProbeSNATIPV6,
+		OvnkUdnDscpValue:       OvnkUdnDscpValue,
+		OvnkUdnInterface:       OvnkUdnInterface,
 	}
 
 	podCfg := &config.AmbientConfig{
@@ -47,6 +49,8 @@ func initMeshDataplane(client kube.Client, args AmbientArgs) (*meshDataplane, er
 		HostProbeSNATAddress:   HostProbeSNATIP,
 		HostProbeV6SNATAddress: HostProbeSNATIPV6,
 		Reconcile:              args.ReconcilePodRulesOnStartup,
+		OvnkUdnDscpValue:       OvnkUdnDscpValue,
+		OvnkUdnInterface:       OvnkUdnInterface,
 	}
 
 	useNftables := args.NativeNftables

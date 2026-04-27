@@ -28,6 +28,7 @@ import (
 	"istio.io/istio/cni/pkg/iptables"
 	"istio.io/istio/cni/pkg/scopes"
 	"istio.io/istio/cni/pkg/util"
+	"istio.io/istio/pilot/pkg/features"
 	istiolog "istio.io/istio/pkg/log"
 	dep "istio.io/istio/tools/istio-iptables/pkg/dependencies"
 	"istio.io/istio/tools/istio-nftables/pkg/builder"
@@ -207,29 +208,70 @@ func (cfg *NftablesConfigurator) AppendInpodRules(podOverrides config.PodLevelOv
 		fmt.Sprintf("0x%x", config.InpodTProxyMark))
 
 	if !podOverrides.IngressMode {
-
 		// Handle healthcheck probes from the host node. In the host netns, before the packet enters the pod, we SNAT
 		// the healthcheck packet to a fixed IP if the packet is coming from a node-local process with a socket.
 		//
 		// We do this so we can exempt this traffic from ztunnel capture/proxy - otherwise both kube-proxy (legit)
 		// and kubelet (skippable) traffic would have the same srcip once they got to the pod, and would be indistinguishable.
 
-		// CLI: nft add rule inet istio-ambient-nat istio-prerouting meta l4proto tcp ip saddr 169.254.7.127 counter accept
-		//
-		// DESC: If this is one of our node-probe ports and is from our SNAT-ed/"special" hostside IP, short-circuit out here
-		cfg.ruleBuilder.AppendRule(IstioPreroutingChain, AmbientNatTable,
-			"meta l4proto tcp",
-			"ip saddr", cfg.cfg.HostProbeSNATAddress.String(), Counter,
-			"accept",
-		)
+		if features.EnableOVNKubernetesUDN {
+			// OVN-K UDN mode: match health check packets by DSCP value and management plane interface IP.
+			ifaceName := cfg.cfg.OvnkUdnInterface
+			var ovnkIPv4 string
+			err := util.RunAsHost(func() error {
+				addr, lookupErr := util.GetInterfaceIPv4(ifaceName)
+				if lookupErr != nil {
+					return lookupErr
+				}
+				ovnkIPv4 = addr.String()
+				return nil
+			})
+			if err != nil {
+				return nil, fmt.Errorf("OVN-K UDN mode: failed to get %s IPv4 address: %w", ifaceName, err)
+			}
 
-		// CLI: nft add rule inet istio-ambient-nat istio-prerouting meta l4proto tcp ip6 saddr
-		// fd16:9254:7127:1337:ffff:ffff:ffff:ffff counter accept
-		cfg.ruleBuilder.AppendV6RuleIfSupported(IstioPreroutingChain, AmbientNatTable,
-			"meta l4proto tcp",
-			"ip6 saddr", cfg.cfg.HostProbeV6SNATAddress.String(), Counter,
-			"accept",
-		)
+			cfg.ruleBuilder.AppendRule(IstioPreroutingChain, AmbientNatTable,
+				"meta l4proto tcp",
+				"ip saddr", ovnkIPv4,
+				"ip dscp", fmt.Sprint(cfg.cfg.OvnkUdnDscpValue), Counter,
+				"accept",
+			)
+
+			if cfg.cfg.EnableIPv6 {
+				var ovnkIPv6 string
+				err := util.RunAsHost(func() error {
+					addr, lookupErr := util.GetInterfaceIPv6(ifaceName)
+					if lookupErr != nil {
+						return lookupErr
+					}
+					ovnkIPv6 = addr.String()
+					return nil
+				})
+				if err != nil {
+					return nil, fmt.Errorf("OVN-K UDN mode: failed to get %s IPv6 address: %w", ifaceName, err)
+				}
+
+				cfg.ruleBuilder.AppendRule(IstioPreroutingChain, AmbientNatTable,
+					"meta l4proto tcp",
+					"ip6 saddr", ovnkIPv6,
+					"ip6 dscp", fmt.Sprint(cfg.cfg.OvnkUdnDscpValue), Counter,
+					"accept",
+				)
+			}
+		} else {
+			// Standard mode: match by SNAT-ed source IP
+			cfg.ruleBuilder.AppendRule(IstioPreroutingChain, AmbientNatTable,
+				"meta l4proto tcp",
+				"ip saddr", cfg.cfg.HostProbeSNATAddress.String(), Counter,
+				"accept",
+			)
+
+			cfg.ruleBuilder.AppendV6RuleIfSupported(IstioPreroutingChain, AmbientNatTable,
+				"meta l4proto tcp",
+				"ip6 saddr", cfg.cfg.HostProbeV6SNATAddress.String(), Counter,
+				"accept",
+			)
+		}
 	}
 
 	// CLI: nft add rule inet istio-ambient-nat istio-output meta l4proto tcp ip daddr 169.254.7.127 counter accept
@@ -470,12 +512,23 @@ func (cfg *NftablesConfigurator) CreateHostRulesForHealthChecks() error {
 	//	It is portable across cgroup versions and k8s distributions. Also, it's slightly stricter than
 	//  iptables "--socket-exists" match which only checks for host-originated sockets.
 
-	cfg.ruleBuilder.AppendRule(PostroutingChain, AmbientNatTable, "meta l4proto tcp", "skuid", kubeletUID,
-		"ip", "daddr", fmt.Sprintf("@%s-v4", config.ProbeIPSet), Counter, "snat", "to", cfg.cfg.HostProbeSNATAddress.String())
+	if features.EnableOVNKubernetesUDN {
+		// OVN-K UDN mode: use DSCP marking instead of SNAT for health check identification.
+		cfg.ruleBuilder.AppendRule(PostroutingChain, AmbientNatTable, "meta l4proto tcp", "skuid", kubeletUID,
+			"ip", "daddr", fmt.Sprintf("@%s-v4", config.ProbeIPSet), Counter,
+			"ip", "dscp", "set", fmt.Sprint(cfg.cfg.OvnkUdnDscpValue))
 
-	// For V6 we have to use a different set and a different SNAT IP
-	cfg.ruleBuilder.AppendV6RuleIfSupported(PostroutingChain, AmbientNatTable, "meta l4proto tcp", "skuid", kubeletUID,
-		"ip6", "daddr", fmt.Sprintf("@%s-v6", config.ProbeIPSet), Counter, "snat", "to", cfg.cfg.HostProbeV6SNATAddress.String())
+		cfg.ruleBuilder.AppendV6RuleIfSupported(PostroutingChain, AmbientNatTable, "meta l4proto tcp", "skuid", kubeletUID,
+			"ip6", "daddr", fmt.Sprintf("@%s-v6", config.ProbeIPSet), Counter,
+			"ip6", "dscp", "set", fmt.Sprint(cfg.cfg.OvnkUdnDscpValue))
+	} else {
+		// Standard mode: use SNAT
+		cfg.ruleBuilder.AppendRule(PostroutingChain, AmbientNatTable, "meta l4proto tcp", "skuid", kubeletUID,
+			"ip", "daddr", fmt.Sprintf("@%s-v4", config.ProbeIPSet), Counter, "snat", "to", cfg.cfg.HostProbeSNATAddress.String())
+
+		cfg.ruleBuilder.AppendV6RuleIfSupported(PostroutingChain, AmbientNatTable, "meta l4proto tcp", "skuid", kubeletUID,
+			"ip6", "daddr", fmt.Sprintf("@%s-v6", config.ProbeIPSet), Counter, "snat", "to", cfg.cfg.HostProbeV6SNATAddress.String())
+	}
 
 	return util.RunAsHost(func() error {
 		tx, err := cfg.executeHostCommands()
@@ -579,15 +632,31 @@ func (cfg *NftablesConfigurator) executeHostCommands() (*knftables.Transaction, 
 		return tx, nil
 	}
 
-	chains := []knftables.Chain{
-		{
-			Name:     PostroutingChain,
-			Table:    AmbientNatTable,
-			Family:   knftables.InetFamily,
-			Type:     knftables.PtrTo(knftables.NATType),
-			Hook:     knftables.PtrTo(knftables.PostroutingHook),
-			Priority: knftables.PtrTo(knftables.SNATPriority),
-		},
+	var chains []knftables.Chain
+	if features.EnableOVNKubernetesUDN {
+		// In UDN mode, DSCP marking requires a filter-type chain at mangle priority
+		// instead of a NAT-type chain at SNAT priority.
+		chains = []knftables.Chain{
+			{
+				Name:     PostroutingChain,
+				Table:    AmbientNatTable,
+				Family:   knftables.InetFamily,
+				Type:     knftables.PtrTo(knftables.FilterType),
+				Hook:     knftables.PtrTo(knftables.PostroutingHook),
+				Priority: knftables.PtrTo(knftables.ManglePriority),
+			},
+		}
+	} else {
+		chains = []knftables.Chain{
+			{
+				Name:     PostroutingChain,
+				Table:    AmbientNatTable,
+				Family:   knftables.InetFamily,
+				Type:     knftables.PtrTo(knftables.NATType),
+				Hook:     knftables.PtrTo(knftables.PostroutingHook),
+				Priority: knftables.PtrTo(knftables.SNATPriority),
+			},
+		}
 	}
 
 	rules := cfg.ruleBuilder.Rules[AmbientNatTable]

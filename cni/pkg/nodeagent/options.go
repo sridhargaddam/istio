@@ -33,6 +33,10 @@ var (
 	UseScopedIptablesLegacyLocking = env.RegisterBoolVar("AMBIENT_USE_SCOPED_XTABLES_LOCKING", true, "").Get()
 	EnableAWSBranchENIProbe        = env.RegisterBoolVar("AMBIENT_ENABLE_AWS_BRANCH_ENI_PROBE", true,
 		"If true, detect AWS VPC CNI branch ENI pods and add ip rules to route probe traffic via veth").Get()
+	OvnkUdnDscpValue              = env.RegisterIntVar("AMBIENT_OVNK_UDN_DSCP", DefaultOVNKUDNDSCP,
+		"DSCP value to mark kubelet health check packets when PILOT_ENABLE_OVNK_UDN is enabled").Get()
+	OvnkUdnInterface              = env.RegisterStringVar("AMBIENT_OVNK_UDN_INTERFACE", DefaultOVNKUDNInterface,
+		"Network interface name used by OVN-Kubernetes for management plane traffic in UDN environments").Get()
 )
 
 const (
@@ -45,6 +49,8 @@ const (
 	// IPv6 link local ranges are designed to be collision-resistant by default, and so probably never need to be overridden
 	DefaultHostProbeSNATIP   = "169.254.7.127"
 	DefaultHostProbeSNATIPV6 = "fd16:9254:7127:1337:ffff:ffff:ffff:ffff"
+	DefaultOVNKUDNDSCP       = 19
+	DefaultOVNKUDNInterface  = "ovn-k8s-mp0"
 )
 
 type AmbientArgs struct {
