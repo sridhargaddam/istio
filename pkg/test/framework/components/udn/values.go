@@ -53,3 +53,25 @@ values:
       k8s.ovn.org/open-default-ports: '%s'
 `, string(portsJSON))
 }
+
+// BuildAmbientControlPlaneValues returns Helm override YAML to configure
+// istiod for OVN-K UDN environments in ambient mode. In addition to the
+// pilot configuration, it enables the UDN feature flag and configures
+// the ztunnel pod template with the open-default-ports annotation.
+func BuildAmbientControlPlaneValues() string {
+	portsJSON, _ := json.Marshal(defaultWaypointPorts())
+	return fmt.Sprintf(`
+values:
+  pilot:
+    env:
+      PILOT_ENABLE_OVNK_UDN: "true"
+    podAnnotations:
+      k8s.ovn.org/open-default-ports: '%s'
+  ztunnel:
+    podAnnotations:
+      k8s.ovn.org/open-default-ports: '%s'
+  cni:
+    ambient:
+      dnsCapture: "false"
+`, string(portsJSON), string(portsJSON))
+}

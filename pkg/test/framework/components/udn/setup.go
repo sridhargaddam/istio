@@ -33,7 +33,9 @@ import (
 //
 // It performs the following:
 //   - Registers NamespaceLabelHook to inject the CUDN primary network label.
+//   - Registers WaypointPostCreateHook to annotate waypoints with OVN-K ports.
 //   - Registers WorkloadAddressHook to resolve CUDN IPs from pod annotations.
+//   - Registers PreInstallHook to pre-create ztunnel namespace with CUDN labels.
 //   - Creates the ClusterUserDefinedNetwork CR on all clusters.
 func SuiteSetup(ctx resource.Context) error {
 	s := ctx.Settings()
@@ -45,7 +47,9 @@ func SuiteSetup(ctx resource.Context) error {
 	scopes.Framework.Infof("UDN plugin: setting up CUDN %q", networkName)
 
 	s.NamespaceLabelHook = AddNamespaceLabels(networkName)
+	s.WaypointPostCreateHook = AnnotateWaypointForCUDN
 	s.WorkloadAddressHook = workloadAddressFromCUDN
+	s.PreInstallHook = preInstallCreateZtunnelNamespace(networkName)
 
 	for _, c := range ctx.AllClusters() {
 		if err := applyCUDNCR(ctx, c, networkName, s.CUDNSelector); err != nil {

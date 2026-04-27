@@ -163,6 +163,12 @@ func NewWaypointProxyForCluster(ctx resource.Context, ns namespace.Instance, nam
 	server.inbound = inbound
 	server.outbound = outbound
 	server.pod = pod
+
+	if hook := ctx.Settings().WaypointPostCreateHook; hook != nil {
+		if err := hook(cls, ns.Name(), name); err != nil {
+			return nil, fmt.Errorf("WaypointPostCreateHook: %w", err)
+		}
+	}
 	return server, nil
 }
 
@@ -230,6 +236,12 @@ func NewWaypointProxy(ctx resource.Context, ns namespace.Instance, name string) 
 		server.inbound = inbound
 		server.outbound = outbound
 		server.pod = pod
+
+		if hook := ctx.Settings().WaypointPostCreateHook; hook != nil {
+			if err := hook(cls, ns.Name(), name); err != nil {
+				return nil, fmt.Errorf("WaypointPostCreateHook: %w", err)
+			}
+		}
 		servers = append(servers, server)
 	}
 	return servers, nil
