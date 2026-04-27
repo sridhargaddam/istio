@@ -246,6 +246,13 @@ func init() {
 
 	flag.BoolVar(&settingsFromCommandLine.Agentgateway, "istio.test.agentgateway", settingsFromCommandLine.Agentgateway,
 		"If set, agentgateway conformance tests will be run.")
+
+	flag.BoolVar(&settingsFromCommandLine.EnableCUDN, "istio.test.enableCUDN", settingsFromCommandLine.EnableCUDN,
+		"Enable OVN-Kubernetes ClusterUserDefinedNetwork (CUDN) support for tests.")
+	flag.StringVar(&settingsFromCommandLine.CUDNNetworkName, "istio.test.cudnNetworkName", "istio-cudn",
+		"Name of the ClusterUserDefinedNetwork CR to create for tests.")
+	flag.StringVar(&settingsFromCommandLine.CUDNSelector, "istio.test.cudnSelector", "",
+		"Label selector expression for the CUDN CR (empty = cluster-wide).")
 	initGatewayConformanceTimeouts()
 }
 

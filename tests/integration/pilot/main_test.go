@@ -22,6 +22,7 @@ import (
 	"istio.io/istio/pkg/test/framework"
 	"istio.io/istio/pkg/test/framework/components/echo/common/deployment"
 	"istio.io/istio/pkg/test/framework/components/istio"
+	"istio.io/istio/pkg/test/framework/components/udn"
 	"istio.io/istio/pkg/test/framework/resource"
 )
 
@@ -40,7 +41,12 @@ var (
 func TestMain(m *testing.M) {
 	framework.
 		NewSuite(m).
-		Setup(istio.Setup(&i, nil)).
+		Setup(udn.SuiteSetup).
+		Setup(istio.Setup(&i, func(ctx resource.Context, cfg *istio.Config) {
+			if ctx.Settings().EnableCUDN {
+				cfg.ControlPlaneValues += udn.BuildControlPlaneValues()
+			}
+		})).
 		Setup(deployment.SetupSingleNamespace(&apps, deployment.Config{})).
 		Setup(func(t resource.Context) error {
 			gatewayConformanceInputs.Client = t.Clusters().Default()

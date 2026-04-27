@@ -328,5 +328,9 @@ func createNamespaceLabels(ctx resource.Context, cfg Config) map[string]string {
 	for k, v := range cfg.Labels {
 		l[k] = v
 	}
+
+	if hook := ctx.Settings().NamespaceLabelHook; hook != nil {
+		hook(l)
+	}
 	return l
 }

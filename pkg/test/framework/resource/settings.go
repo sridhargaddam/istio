@@ -21,11 +21,13 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	gwConformanceConfig "sigs.k8s.io/gateway-api/conformance/utils/config"
 	"sigs.k8s.io/yaml"
 
 	"istio.io/istio/pkg/test"
+	"istio.io/istio/pkg/test/framework/components/cluster"
 	"istio.io/istio/pkg/test/framework/label"
 	"istio.io/istio/pkg/util/sets"
 )
@@ -206,6 +208,35 @@ type Settings struct {
 	// Agentgateway indicates that the agentgateway tests should be run. This is gated behind a separate flag since
 	// agentgateway support is experimental.
 	Agentgateway bool
+
+	// EnableCUDN indicates that the test environment uses OVN-Kubernetes
+	// ClusterUserDefinedNetwork. When true, the UDN test plugin hooks are
+	// invoked for namespace labeling, waypoint annotation, and workload
+	// address resolution.
+	EnableCUDN bool
+
+	// CUDNNetworkName is the name of the ClusterUserDefinedNetwork CR.
+	CUDNNetworkName string
+
+	// CUDNSelector is the label selector expression for the CUDN CR
+	// (e.g. "app in (foo,bar)" or left empty for cluster-wide).
+	CUDNSelector string
+
+	// NamespaceLabelHook, if set, is called during namespace creation to
+	// inject additional labels (e.g., CUDN primary network label).
+	NamespaceLabelHook func(labels map[string]string)
+
+	// WaypointPostCreateHook, if set, is called after a waypoint proxy is
+	// created to apply additional configuration (e.g., OVN-K port annotations).
+	WaypointPostCreateHook func(cls cluster.Cluster, namespace, name string) error
+
+	// WorkloadAddressHook, if set, overrides workload IP resolution. Returns
+	// nil to fall back to the default Pod.Status.PodIP.
+	WorkloadAddressHook func(pod *corev1.Pod) []string
+
+	// PreInstallHook, if set, is called before Istio installation to perform
+	// pre-requisite setup (e.g., creating ztunnel namespace with CUDN labels).
+	PreInstallHook func(ctx Context) error
 }
 
 // SkipVMs changes the skip settings at runtime

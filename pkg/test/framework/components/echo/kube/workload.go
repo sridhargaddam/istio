@@ -174,18 +174,31 @@ func (w *workload) PodName() string {
 
 func (w *workload) Address() string {
 	w.mutex.Lock()
-	ip := w.pod.Status.PodIP
+	pod := w.pod
 	w.mutex.Unlock()
-	return ip
+
+	if hook := w.ctx.Settings().WorkloadAddressHook; hook != nil {
+		if addrs := hook(&pod); len(addrs) > 0 {
+			return addrs[0]
+		}
+	}
+	return pod.Status.PodIP
 }
 
 func (w *workload) Addresses() []string {
 	w.mutex.Lock()
+	pod := w.pod
+	w.mutex.Unlock()
+
+	if hook := w.ctx.Settings().WorkloadAddressHook; hook != nil {
+		if addrs := hook(&pod); len(addrs) > 0 {
+			return addrs
+		}
+	}
 	var addresses []string
-	for _, podIP := range w.pod.Status.PodIPs {
+	for _, podIP := range pod.Status.PodIPs {
 		addresses = append(addresses, podIP.IP)
 	}
-	w.mutex.Unlock()
 	return addresses
 }
 

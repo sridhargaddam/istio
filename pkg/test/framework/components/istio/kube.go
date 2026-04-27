@@ -783,9 +783,12 @@ func (i *istioImpl) deployCACerts() error {
 		}
 
 		// Create the system namespace.
-		var nsLabels map[string]string
+		nsLabels := make(map[string]string)
 		if i.env.IsMultiNetwork() {
-			nsLabels = map[string]string{label.TopologyNetwork.Name: c.NetworkName()}
+			nsLabels[label.TopologyNetwork.Name] = c.NetworkName()
+		}
+		if hook := i.ctx.Settings().NamespaceLabelHook; hook != nil {
+			hook(nsLabels)
 		}
 		var nsAnnotations map[string]string
 		if c.IsRemote() {
