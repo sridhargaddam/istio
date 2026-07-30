@@ -27,10 +27,16 @@ import (
 // ProgramNftables sets up nftables rules for traffic redirection.
 // It also sets up TPROXY rules if rules are successfully applied.
 func ProgramNftables(cfg *config.Config) error {
+	return ProgramNftablesWithProvider(cfg, nil)
+}
+
+// ProgramNftablesWithProvider sets up nftables rules for traffic redirection
+// using the given nftProvider. If nftProvider is nil, the default system provider is used.
+func ProgramNftablesWithProvider(cfg *config.Config, nftProvider capture.NftProviderFunc) error {
 	log.Info("native nftables enabled, using nft rules for traffic redirection.")
 
 	if !cfg.SkipRuleApply {
-		nftConfigurator, err := capture.NewNftablesConfigurator(cfg, nil)
+		nftConfigurator, err := capture.NewNftablesConfigurator(cfg, nftProvider)
 		if err != nil {
 			return err
 		}

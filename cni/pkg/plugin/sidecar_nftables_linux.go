@@ -20,9 +20,14 @@ import (
 	"fmt"
 
 	"github.com/containernetworking/plugins/pkg/ns"
+	"golang.org/x/sys/unix"
+	"sigs.k8s.io/knftables"
 
 	"istio.io/istio/pkg/log"
 	"istio.io/istio/tools/common/config"
+	"istio.io/istio/tools/common/userns"
+	"istio.io/istio/tools/istio-nftables/pkg/builder"
+	"istio.io/istio/tools/istio-nftables/pkg/capture"
 	"istio.io/istio/tools/istio-nftables/pkg/nft"
 )
 
@@ -56,13 +61,27 @@ func (n *nftables) Program(podName, netns string, rdrct *Redirect) error {
 	}
 	defer netNs.Close()
 
+	// Detect user namespace (hostUsers: false) before entering the network namespace.
+	var nftProvider capture.NftProviderFunc
+	parentUserNsFd, isUserNs, detectErr := userns.DetectUserNamespace(netns)
+	if detectErr != nil {
+		log.Debugf("User namespace detection returned error (proceeding without user ns support): %v", detectErr)
+	}
+	if isUserNs {
+		defer unix.Close(parentUserNsFd)
+		userNsPath := userns.BuildProcFdPath(parentUserNsFd)
+		log.Infof("User namespace detected for pod %v, using nsenter-wrapped nft execution (--user=%s --net=%s)", podName, userNsPath, netns)
+		nftProvider = func(family knftables.Family, table string) (builder.NftablesAPI, error) {
+			return builder.NewNftUserNsImpl(family, table, userNsPath, netns)
+		}
+	}
+
 	return netNs.Do(func(_ ns.NetNS) error {
-		// Important: run within the pod network namespace since some attributes are namespace specific
 		if err := cfg.FillConfigFromEnvironment(); err != nil {
 			return err
 		}
 		log.Infof("============= Start nftables configuration for %v =============", podName)
 		defer log.Infof("============= End nftables configuration for %v =============", podName)
-		return nft.ProgramNftables(cfg)
+		return nft.ProgramNftablesWithProvider(cfg, nftProvider)
 	})
 }

@@ -31,6 +31,7 @@ import (
 	utilversion "k8s.io/apimachinery/pkg/util/version"
 
 	"istio.io/istio/pkg/log"
+	"istio.io/istio/tools/common/userns"
 	"istio.io/istio/tools/istio-iptables/pkg/constants"
 )
 
@@ -245,43 +246,12 @@ func mount(src, dst string) error {
 	return syscall.Mount(src, dst, "", syscall.MS_BIND|syscall.MS_RDONLY, "")
 }
 
-// build fd /proc path to use for nsenter
-func buildProcFdPath(fd int) string {
-	return fmt.Sprintf("/proc/%d/fd/%d", os.Getpid(), fd)
-}
-
-// retrieves the internal namespace id of the kernel for the given fd namespace path
-func getNsID(nsPath string) (int, error) {
-	fd, err := unix.Open(nsPath, unix.O_RDONLY, 0)
-	if err != nil {
-		return 0, err
-	}
-	defer unix.Close(fd)
-
-	var stat unix.Stat_t
-	err = unix.Fstat(fd, &stat)
-	if err != nil {
-		return 0, err
-	}
-
-	return int(stat.Ino), nil
-}
-
-// retrieves on success the parent user ns fd and return the fd
-func getParentUserNsByNsPath(nsPath string) (int, error) {
-	fd, err := unix.Open(nsPath, unix.O_RDONLY, 0)
-	if err != nil {
-		return 0, err
-	}
-	defer unix.Close(fd)
-
-	nsFd, err := unix.IoctlRetInt(fd, unix.NS_GET_USERNS)
-	if err != nil {
-		return 0, err
-	}
-
-	return nsFd, nil
-}
+// Aliases for the shared userns detection functions, kept here for internal use.
+var (
+	buildProcFdPath        = userns.BuildProcFdPath
+	getNsID                = userns.GetNsID
+	getParentUserNsByNsPath = userns.GetParentUserNsByNsPath
+)
 
 func (r *RealDependencies) executeXTables(log *log.Scope, cmd constants.IptablesCmd, iptVer *IptablesVersion,
 	silenceErrors bool, stdin io.ReadSeeker, args ...string,
