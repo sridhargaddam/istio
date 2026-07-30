@@ -31,6 +31,7 @@ import (
 	utilversion "k8s.io/apimachinery/pkg/util/version"
 
 	"istio.io/istio/pkg/log"
+	"istio.io/istio/tools/common/userns"
 	"istio.io/istio/tools/istio-iptables/pkg/constants"
 )
 
@@ -245,43 +246,6 @@ func mount(src, dst string) error {
 	return syscall.Mount(src, dst, "", syscall.MS_BIND|syscall.MS_RDONLY, "")
 }
 
-// build fd /proc path to use for nsenter
-func buildProcFdPath(fd int) string {
-	return fmt.Sprintf("/proc/%d/fd/%d", os.Getpid(), fd)
-}
-
-// retrieves the internal namespace id of the kernel for the given fd namespace path
-func getNsID(nsPath string) (int, error) {
-	fd, err := unix.Open(nsPath, unix.O_RDONLY, 0)
-	if err != nil {
-		return 0, err
-	}
-	defer unix.Close(fd)
-
-	var stat unix.Stat_t
-	err = unix.Fstat(fd, &stat)
-	if err != nil {
-		return 0, err
-	}
-
-	return int(stat.Ino), nil
-}
-
-// retrieves on success the parent user ns fd and return the fd
-func getParentUserNsByNsPath(nsPath string) (int, error) {
-	fd, err := unix.Open(nsPath, unix.O_RDONLY, 0)
-	if err != nil {
-		return 0, err
-	}
-	defer unix.Close(fd)
-
-	nsFd, err := unix.IoctlRetInt(fd, unix.NS_GET_USERNS)
-	if err != nil {
-		return 0, err
-	}
-
-	return nsFd, nil
-}
 
 func (r *RealDependencies) executeXTables(log *log.Scope, cmd constants.IptablesCmd, iptVer *IptablesVersion,
 	silenceErrors bool, stdin io.ReadSeeker, args ...string,
@@ -312,30 +276,16 @@ func (r *RealDependencies) executeXTables(log *log.Scope, cmd constants.Iptables
 	executable, errName := os.Executable()
 	// check only in istio-cni mode for backwards compatibility
 	if errName == nil && filepath.Base(executable) == "istio-cni" {
-		parentNs, errParent := getParentUserNsByNsPath(r.NetworkNamespace)
-		defer unix.Close(parentNs)
-		grandParentNs, errGrandParent := getParentUserNsByNsPath(buildProcFdPath(parentNs))
-		defer unix.Close(grandParentNs)
-
-		if errParent == nil && errGrandParent == nil {
-			// retrieve nsID for comparison, if grandParentNsID is 0 (access denied)
-			// it means it's already kernel base user namepace or we don't have the permissions
-			// in that case ignore it
-			netNsID, errNsID := getNsID(r.NetworkNamespace)
-			parentNsID, errParentNsID := getNsID(buildProcFdPath(parentNs))
-			grandParentNsID, errGrandParentNsID := getNsID(buildProcFdPath(grandParentNs))
-			// we successfully retrieved parentNs and grandParentNs if they do not match the net ns is inside a linux user ns
-			if errNsID == nil && errParentNsID == nil && errGrandParentNsID == nil && parentNsID != grandParentNsID {
-				log.Debugf("k8s user namespaces relationship detected linux base %d -> %d -> %d", grandParentNsID, parentNsID, netNsID)
-				log.Debugf("using nsenter with --user=%s --net=%s %s", buildProcFdPath(parentNs), r.NetworkNamespace, cmdBin)
-				// check if nsenter is available otherwise inform user about that fact and k8s user namespace detection
-				_, errNsBinaryPath := exec.LookPath("nsenter")
-				if errNsBinaryPath != nil {
-					log.Errorf("k8s user namespace / hostUsers: false pod network namespace %s detected, but no nsenter binary found", r.NetworkNamespace)
-				} else {
-					args = append([]string{fmt.Sprintf("--user=%s", buildProcFdPath(parentNs)), fmt.Sprintf("--net=%s", r.NetworkNamespace), cmdBin}, args...)
-					cmdBin = "nsenter"
-				}
+		parentNsFd, isUserNs, _ := userns.DetectUserNamespace(r.NetworkNamespace)
+		if isUserNs {
+			defer unix.Close(parentNsFd)
+			log.Debugf("using nsenter with --user=%s --net=%s %s", userns.BuildProcFdPath(parentNsFd), r.NetworkNamespace, cmdBin)
+			_, errNsBinaryPath := exec.LookPath("nsenter")
+			if errNsBinaryPath != nil {
+				log.Errorf("k8s user namespace / hostUsers: false pod network namespace %s detected, but no nsenter binary found", r.NetworkNamespace)
+			} else {
+				args = append([]string{fmt.Sprintf("--user=%s", userns.BuildProcFdPath(parentNsFd)), fmt.Sprintf("--net=%s", r.NetworkNamespace), cmdBin}, args...)
+				cmdBin = "nsenter"
 			}
 		}
 	}

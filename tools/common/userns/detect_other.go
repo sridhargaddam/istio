@@ -1,5 +1,3 @@
-//go:build integ
-
 // Copyright Istio Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pilot
+//go:build !linux
 
-import (
-	"testing"
+package userns
 
-	"istio.io/istio/pkg/test/framework"
-	"istio.io/istio/tests/integration/pilot/common"
-)
+import "fmt"
 
-func TestUserNamespace(t *testing.T) {
-	framework.
-		NewTest(t).
-		Run(func(t framework.TestContext) {
-			common.RunUserNamespaceTests(t, apps.A[0])
-		})
+// BuildProcFdPath returns the /proc path for a file descriptor in the current process.
+// On non-Linux platforms this is not meaningful but is provided for compilation.
+func BuildProcFdPath(fd int) string {
+	return fmt.Sprintf("/proc/%d/fd/%d", 0, fd)
+}
+
+// DetectUserNamespace is a no-op on non-Linux platforms.
+func DetectUserNamespace(_ string) (int, bool, error) {
+	return 0, false, nil
 }
